@@ -1,5 +1,0 @@
-[package]
-name = "zk_docsim"
-version = "0.1.0"
-type = "bin"
-authors = ["Carlos"]
