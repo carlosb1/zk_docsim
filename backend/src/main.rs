@@ -25,15 +25,19 @@ use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
 };
+use tower_http::cors::CorsLayer;
+use tower_http::cors::Any;
 use tokio::sync::broadcast;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::fmt::layer;
 
 // Our shared state
 struct AppState {
     // We require unique usernames. This tracks which usernames have been taken.
     user_set: Mutex<HashSet<String>>,
+
     // Channel used to send messages to all connected clients.
-    tx: broadcast::Sender<String>,
+   // tx: broadcast::Sender<String>,
 }
 
 #[tokio::main]
@@ -48,12 +52,17 @@ async fn main() {
 
     // Set up application state for use with with_state().
     let user_set = Mutex::new(HashSet::new());
-    let (tx, _rx) = broadcast::channel(100);
+//    let (tx, _rx) = broadcast::channel(100);
 
-    let app_state = Arc::new(AppState { user_set, tx });
+    let app_state = Arc::new(AppState { user_set });
 
     let serve_dir = ServeDir::new("web/verifier").not_found_service(ServeFile::new("web/verifier/index.html"));
     //let yew_serve_dir = ServeDir::new("web/yew").not_found_service(ServeFile::new("web/yew/index.html"));
+
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
 
     let app = Router::new()
@@ -63,6 +72,7 @@ async fn main() {
  //       .nest_service("/yew", yew_serve_dir.clone())
         .route("/ws", get(websocket_handler))
         .with_state(app_state);
+    //    .layer(cors);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
@@ -81,100 +91,18 @@ async fn websocket_handler(
 // This function deals with a single websocket connection, i.e., a single
 // connected client / user, for which we will spawn two independent tasks (for
 // receiving / sending chat messages).
-async fn websocket(stream: WebSocket, state: Arc<AppState>) {
+async fn websocket(mut stream: WebSocket, state: Arc<AppState>) {
+    println!("WebSocket connection established");
 
-    // By splitting, we can send and receive at the same time.
-    let (mut sender, mut receiver) = stream.split();
-
-    // Username gets set in the receive loop, if it's valid.
-    let mut username = String::new();
-    // Loop until a text message is found.
-    while let Some(Ok(message)) = receiver.next().await {
-        if let Message::Text(name) = message {
-            tracing::debug!("received on {}", name.as_str());
-            // If username that is sent by client is not taken, fill username string.
-            /*
-            check_username(&state, &mut username, name.as_str());
-
-            // If not empty we want to quit the loop else we want to quit function.
-            if !username.is_empty() {
-                break;
-            } else {
-                // Only send our client that username is taken.
-                let _ = sender
-                    .send(Message::Text(Utf8Bytes::from_static(
-                        "Username already taken.",
-                    )))
-                    .await;
-
-                return;
-            }
-             */
-            // we check messages and we can response via send
+    while let Some(Ok(msg)) = stream.next().await {
+        if let Message::Text(txt) = msg {
+            println!("Received: {}", txt);
+            let _ = stream.send(Message::Text(txt)).await;
         }
     }
 
-    // We subscribe *before* sending the "joined" message, so that we will also
-    // display it to our client.
-    let mut rx = state.tx.subscribe();
-
-    // Now send the "joined" message to all subscribers.
-    //    let msg = format!("{username} joined.");
-    //tracing::debug!("{msg}");
-    //let _ = state.tx.send(msg);
-
-    // Spawn the first task that will receive broadcast messages and send text
-    // messages over the websocket to our client.
-    let mut send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            // In any websocket error, break loop.
-            if sender.send(Message::text(msg)).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    // Clone things we want to pass (move) to the receiving task.
-    let tx = state.tx.clone();
-    let name = username.clone();
-
-    // Spawn a task that takes messages from the websocket, prepends the user
-    // name, and sends them to all broadcast subscribers.
-    let mut recv_task = tokio::spawn(async move {
-        while let Some(Ok(Message::Text(text))) = receiver.next().await {
-            // Add username before message.
-            let _ = tx.send(format!("{name}: {text}"));
-        }
-    });
-
-    // If any one of the tasks run to completion, we abort the other.
-    tokio::select! {
-        _ = &mut send_task => recv_task.abort(),
-        _ = &mut recv_task => send_task.abort(),
-    };
-
-    // Send "user left" message (similar to "joined" above).
-    let msg = format!("{username} left.");
-    tracing::debug!("{msg}");
-    let _ = state.tx.send(msg);
-
-    // Remove username from map so new clients can take it again.
-    state.user_set.lock().unwrap().remove(&username);
+    println!("WebSocket connection closed");
 }
-
-/*
-fn check_username(state: &AppState, string: &mut String, name: &str) {
-
-let mut user_set = state.user_set.lock().unwrap();
-
-if !user_set.contains(name) {
-    user_set.insert(name.to_owned());
-
-    string.push_str(name);
-}
-
-}
- */
 
 // Include utf-8 file at **compile** time.
 async fn index() -> Html<&'static str> {
