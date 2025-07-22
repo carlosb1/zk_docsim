@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["host", "methods", "wasm-verifier"]
+members = [ "backend", "frontend","host", "methods", "wasm-verifier"]
 
 # Always optimize; building and running the guest takes much longer without optimization.
 [profile.dev]
