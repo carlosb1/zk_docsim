@@ -6,15 +6,10 @@
 //! cargo run -p example-chat
 //! ```
 
-use axum::{
-    extract::{
-        ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
-        State,
-    },
-    response::{Html, IntoResponse},
-    routing::get,
-    Router,
-};
+use axum::{extract::{
+    ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
+    State,
+}, response::{Html, IntoResponse}, routing::get, Json, Router};
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::TraceLayer,
@@ -30,6 +25,14 @@ use tower_http::cors::Any;
 use tokio::sync::broadcast;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_subscriber::fmt::layer;
+
+use axum::{
+    extract::Multipart,
+    routing::post
+};
+use serde::Serialize;
+use std::net::SocketAddr;
+
 
 // Our shared state
 struct AppState {
@@ -66,13 +69,15 @@ async fn main() {
 
 
     let app = Router::new()
+        .layer(cors)
         .route("/", get(index))
  //       .route("/wasm", get(wasm_index))
         .nest_service("/verifier", serve_dir.clone())
  //       .nest_service("/yew", yew_serve_dir.clone())
         .route("/ws", get(websocket_handler))
+        .route("/upload", post(upload_file))
         .with_state(app_state);
-    //    .layer(cors);
+    
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
         .await
@@ -102,6 +107,31 @@ async fn websocket(mut stream: WebSocket, state: Arc<AppState>) {
     }
 
     println!("WebSocket connection closed");
+}
+
+
+#[derive(Serialize)]
+struct EmbeddingResponse {
+    embedding: Vec<f32>,
+}
+
+async fn upload_file(mut multipart: Multipart) -> Json<EmbeddingResponse> {
+    while let Some(field) = multipart.next_field().await.unwrap() {
+        let name = field.name().unwrap_or("").to_string();
+        let data = field.bytes().await.unwrap();
+
+        let content = String::from_utf8_lossy(&data);
+        let embedding = vectorize_text(&content);
+
+        return Json(EmbeddingResponse { embedding });
+    }
+
+    Json(EmbeddingResponse { embedding: vec![] })
+}
+
+fn vectorize_text(text: &str) -> Vec<f32> {
+    let avg_ascii = text.bytes().map(|b| b as f32).sum::<f32>() / text.len() as f32;
+    vec![text.len() as f32, avg_ascii]
 }
 
 // Include utf-8 file at **compile** time.
