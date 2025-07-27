@@ -6,39 +6,56 @@
 //! cargo run -p example-chat
 //! ```
 
+mod embedded;
+mod services;
+
 use axum::{extract::{
-    ws::{Message, Utf8Bytes, WebSocket, WebSocketUpgrade},
+    ws::{Message, WebSocket, WebSocketUpgrade},
     State,
-}, response::{Html, IntoResponse}, routing::get, Json, Router};
+}, response::{Html, IntoResponse}, routing::get, Form, Json, Router};
 use tower_http::{
     services::{ServeDir, ServeFile},
-    trace::TraceLayer,
 };
 
-use futures_util::{sink::SinkExt, stream::StreamExt};
+use futures_util::{stream::StreamExt};
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
 };
 use tower_http::cors::CorsLayer;
 use tower_http::cors::Any;
-use tokio::sync::broadcast;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use tracing_subscriber::fmt::layer;
 
 use axum::{
     extract::Multipart,
     routing::post
 };
-use serde::Serialize;
-use std::net::SocketAddr;
+
+use axum::debug_handler;
+
+
+use fastembed::EmbeddingModel::ModernBertEmbedLarge;
+use serde::{Deserialize, Serialize};
+use crate::embedded::{DocumentEntry, ModelEmbed};
+
+
+#[derive(Serialize)]
+struct EmbeddingResponse {
+    embedding: Vec<f32>,
+}
+
+
+#[derive(Serialize, Deserialize)]
+pub struct UploadFileForm {
+    name: Option<String>,
+    content: Option<String>,
+}
+
 
 
 // Our shared state
 struct AppState {
-    // We require unique usernames. This tracks which usernames have been taken.
-    user_set: Mutex<HashSet<String>>,
-
+    ml_model: Mutex<ModelEmbed>
     // Channel used to send messages to all connected clients.
    // tx: broadcast::Sender<String>,
 }
@@ -54,10 +71,8 @@ async fn main() {
         .init();
 
     // Set up application state for use with with_state().
-    let user_set = Mutex::new(HashSet::new());
-//    let (tx, _rx) = broadcast::channel(100);
-
-    let app_state = Arc::new(AppState { user_set });
+    let ml_model = Mutex::new(ModelEmbed::new());
+    let app_state = Arc::new(AppState { ml_model});
 
     let serve_dir = ServeDir::new("web/verifier").not_found_service(ServeFile::new("web/verifier/index.html"));
     //let yew_serve_dir = ServeDir::new("web/yew").not_found_service(ServeFile::new("web/yew/index.html"));
@@ -71,9 +86,7 @@ async fn main() {
     let app = Router::new()
         .layer(cors)
         .route("/", get(index))
- //       .route("/wasm", get(wasm_index))
         .nest_service("/verifier", serve_dir.clone())
- //       .nest_service("/yew", yew_serve_dir.clone())
         .route("/ws", get(websocket_handler))
         .route("/upload", post(upload_file))
         .with_state(app_state);
@@ -110,37 +123,23 @@ async fn websocket(mut stream: WebSocket, state: Arc<AppState>) {
 }
 
 
-#[derive(Serialize)]
-struct EmbeddingResponse {
-    embedding: Vec<f32>,
-}
 
-async fn upload_file(mut multipart: Multipart) -> Json<EmbeddingResponse> {
-    while let Some(field) = multipart.next_field().await.unwrap() {
-        let name = field.name().unwrap_or("").to_string();
-        let data = field.bytes().await.unwrap();
+async fn upload_file(
+    State(state): State<Arc<AppState>>,
+    Form(form): Form<UploadFileForm>) -> Json<EmbeddingResponse>  {
+    let name = form.name.unwrap_or(String::new());
+    let content = form.content.unwrap_or(String::new());
 
-        let content = String::from_utf8_lossy(&data);
-        let embedding = vectorize_text(&content);
-
-        return Json(EmbeddingResponse { embedding });
+    if content.is_empty() {
+        return Json(EmbeddingResponse{embedding: Vec::new()});
     }
-
-    Json(EmbeddingResponse { embedding: vec![] })
+    let embedding = state.ml_model.lock().unwrap().calculate_one_embed(
+        DocumentEntry::new(name.as_str(), &content)).map_err(|e| Json(format!("{}", e))).unwrap();
+    Json(EmbeddingResponse { embedding })
 }
 
-fn vectorize_text(text: &str) -> Vec<f32> {
-    let avg_ascii = text.bytes().map(|b| b as f32).sum::<f32>() / text.len() as f32;
-    vec![text.len() as f32, avg_ascii]
-}
 
-// Include utf-8 file at **compile** time.
 async fn index() -> Html<&'static str> {
     Html(std::include_str!("../index.html"))
 }
-/*
-async fn wasm_index() -> Html<&'static str> {
-    Html(std::include_str!("../web/wasm/wasm.html"))
-}
 
- */

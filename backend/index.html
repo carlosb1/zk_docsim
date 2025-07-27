@@ -8,10 +8,11 @@
 <h1>Upload a Document</h1>
 
 <form action="http://127.0.0.1:3000/upload" method="post" enctype="multipart/form-data">
-    <label for="file">Choose a document to upload:</label>
-    <input type="file" id="file" name="file" required>
+    <label for="fileInput">Choose a document to upload:</label>
+    <input type="file" id="fileInput" name="file" required>
     <br><br>
     <button type="submit">Upload</button>
+    <pre id="result"></pre>
 </form>
 
 <script>
@@ -19,14 +20,34 @@
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
 
-        const formData = new FormData(form);
-        const response = await fetch(form.action, {
-            method: "POST",
-            body: formData,
-        });
+        const fileInput = document.getElementById("fileInput");
+        const file = fileInput.files[0];
+        if (!file) {
+            alert("Selecciona un archivo");
+            return;
+        }
 
-        const result = await response.json();
-        alert("Embedding: " + JSON.stringify(result.embedding));
+        const reader = new FileReader();
+        reader.onload = async function(event) {
+            const content = event.target.result;
+
+            const formData = new URLSearchParams();
+            formData.append("name", file.name);
+            formData.append("content", content);
+
+            const res = await fetch("/upload", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: formData.toString()
+            });
+
+            const json = await res.json();
+            document.getElementById("result").textContent = JSON.stringify(json, null, 2);
+        };
+
+        reader.readAsText(file);  // También puedes usar readAsArrayBuffer o readAsBinaryString si quieres binario
     });
 </script>
 

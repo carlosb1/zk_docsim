@@ -4,10 +4,16 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = { version = "0.8.4", features = ["ws", "multipart"] }
+axum = { version = "0.8.4", features = ["ws", "multipart", "macros"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tower-http = { version = "0.6.1", features = ["fs", "trace", "cors"] }
 serde = { version = "1.0.219", features = ["derive"] }
+fastembed = "4"
+anyhow = "1.0.98"
+serde_json = "1.0.140"
+arroy = "0.6.1"
+tempfile = "3.20.0"
+heed = "0.22.0"
