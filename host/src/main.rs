@@ -47,10 +47,19 @@ fn main() {
 
     // For example:
     /* add input for circuit */
-    let input: u32 = 15 * u32::pow(2, 27) + 1;
+    let input = ([0.1, 0.8, 0.3], [0.2, 0.9, 0.1]);
 
-    let receipt = execute_prover(input);
+    let env = ExecutorEnv::builder().write(&input).unwrap().build().unwrap();
 
+    // Obtain the default prover.
+    let prover = default_prover();
+
+    let prove_info = prover
+        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
+        .unwrap();
+
+    // extract the receipt.
+    let receipt = prove_info.receipt;
     let bytes = bincode::serialize(&receipt).unwrap();
 
     //fs::write("receipt.bin", bytes.clone()).unwrap();
