@@ -55,7 +55,6 @@ pub struct UploadFileForm {
 
 // Our shared state
 struct AppState {
-    ml_model: Mutex<ModelEmbed>,
     memory_db: Mutex<SimpleDBNN<ModelEmbed, Euclidean>>
     // Channel used to send messages to all connected clients.
    // tx: broadcast::Sender<String>,
@@ -72,9 +71,8 @@ async fn main() {
         .init();
 
     // Set up application state for use with with_state().
-    let ml_model = Mutex::new(ModelEmbed::new());
     let memory_db = Mutex::new(SimpleDBNN::from_config(DBConfig::default()).unwrap());
-    let app_state = Arc::new(AppState { ml_model, memory_db});
+    let app_state = Arc::new(AppState {memory_db});
 
     let serve_dir = ServeDir::new("web/verifier").not_found_service(ServeFile::new("web/verifier/index.html"));
     //let yew_serve_dir = ServeDir::new("web/yew").not_found_service(ServeFile::new("web/yew/index.html"));
@@ -91,7 +89,7 @@ async fn main() {
         .nest_service("/verifier", serve_dir.clone())
         .route("/ws", get(websocket_handler))
         .route("/upload", post(upload_file))
-        .route("/search", get(search))
+        .route("/search", post(search))
         .with_state(app_state);
     
 

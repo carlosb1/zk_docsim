@@ -1,0 +1,15 @@
+{
+  "name": "wasm-verifier",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "wasm_verifier_bg.wasm",
+    "wasm_verifier.js",
+    "wasm_verifier.d.ts"
+  ],
+  "main": "wasm_verifier.js",
+  "types": "wasm_verifier.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

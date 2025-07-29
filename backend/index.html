@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Upload Document</title>
+
 </head>
 <body>
 <h1>Upload a Document</h1>
@@ -15,6 +16,13 @@
     <pre id="result"></pre>
 </form>
 
+<input type="text" id="query" placeholder="Escribe tu texto" />
+<button onclick="search()">Buscar</button>
+<pre id="results"></pre>
+
+<button onclick="run()">Verificar</button>
+<pre id="output"></pre>
+<script type="module" src="verifier/main.js"></script>
 <script>
     const form = document.querySelector("form");
     form.addEventListener("submit", async (event) => {
@@ -47,9 +55,35 @@
             document.getElementById("result").textContent = JSON.stringify(json, null, 2);
         };
 
-        reader.readAsText(file);  // También puedes usar readAsArrayBuffer o readAsBinaryString si quieres binario
+        reader.readAsText(file);
     });
-</script>
 
+    /* search function */
+    async function search() {
+        const content = document.getElementById("query").value;
+        const resultsElement = document.getElementById("results");
+
+        const response = await fetch("/search", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                content: content,
+                top_k: 5
+            })
+        });
+
+        if (!response.ok) {
+            resultsElement.textContent = "❌ Error en la búsqueda";
+            return;
+        }
+
+        const results = await response.json();
+
+        resultsElement.textContent = JSON.stringify(results, null, 2);
+    }
+
+</script>
 </body>
 </html>
