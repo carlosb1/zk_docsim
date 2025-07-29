@@ -30,8 +30,7 @@ use axum::{
 };
 
 use axum::debug_handler;
-
-
+use axum::http::StatusCode;
 use fastembed::EmbeddingModel::ModernBertEmbedLarge;
 use serde::{Deserialize, Serialize};
 use services::embed::{DocumentEntry, ModelEmbed};
@@ -89,6 +88,7 @@ async fn main() {
         .nest_service("/verifier", serve_dir.clone())
         .route("/ws", get(websocket_handler))
         .route("/upload", post(upload_file))
+        .route("/search", get(search))
         .with_state(app_state);
     
 
@@ -126,16 +126,66 @@ async fn websocket(mut stream: WebSocket, state: Arc<AppState>) {
 
 async fn upload_file(
     State(state): State<Arc<AppState>>,
-    Form(form): Form<UploadFileForm>) -> Json<EmbeddingResponse>  {
+    Form(form): Form<UploadFileForm>) -> Result<Json<EmbeddingResponse>, (StatusCode, Json<EmbeddingResponse>)>   {
     let name = form.name.unwrap_or(String::new());
     let content = form.content.unwrap_or(String::new());
 
-
     if content.is_empty() {
-        return Json(EmbeddingResponse{embedding: Vec::new()});
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(EmbeddingResponse {
+                embedding: vec![],
+            }),
+        ));
     }
-    let embedding = state.memory_db.lock().unwrap().put(content.as_str()).map_err(|e| Json(e)).unwrap();
-    Json(EmbeddingResponse { embedding })
+    let query = format!("{:}\n{:}", name, content);
+    let embedding = state.memory_db.lock().unwrap().put(query.as_str()).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(EmbeddingResponse {
+                embedding: vec![], // or include error message in another field
+            }),
+        )
+    })?;
+    Ok(Json(EmbeddingResponse { embedding }))
+}
+
+#[derive(Deserialize)]
+struct SearchRequest {
+    content: String,
+    top_k: usize,
+}
+
+#[derive(Serialize)]
+struct SearchResult {
+    id: u32,
+    content: String,
+    score: f32,
+}
+
+impl SearchResult {
+    pub fn new(id: u32, score: f32,  content: String) -> Self {
+        Self { id, content, score }
+    }
+}
+
+async fn search(State(state): State<Arc<AppState>>, Json(req): Json<SearchRequest>)->
+                                                                                   Result<
+                                                                                       Json<Vec<SearchResult>>,
+                                                                                       (StatusCode, Json<Vec<SearchResult>>)
+                                                                                   > {
+    let results = state.memory_db.lock().unwrap().get(req.content.as_str(), req.top_k).map_err(|err| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(Vec::new()),
+        )
+    })?;
+    let search_results = results.iter().map(|(id, score,content )|
+        {
+            SearchResult::new(*id, *score, content.clone())
+        }
+    ).collect::<Vec<SearchResult>>();
+    Ok(Json(search_results))
 }
 
 
