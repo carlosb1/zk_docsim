@@ -2,6 +2,7 @@ use std::io::ErrorKind;
 use anyhow::Error;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use serde::{Deserialize, Serialize};
+use crate::services::simple_db_nn::Embeddable;
 
 #[derive(Serialize, Deserialize)]
 pub struct DocumentEntry {
@@ -19,6 +20,12 @@ pub struct ModelEmbed{
     model: TextEmbedding,
 }
 
+impl Default for ModelEmbed {
+    fn default() -> Self {
+        ModelEmbed::new()
+    }
+}
+
 impl ModelEmbed {
     pub fn new() -> Self {
         let model = TextEmbedding::try_new(InitOptions::new(EmbeddingModel::AllMiniLML6V2)).expect("Failed to create Embedding");
@@ -32,6 +39,16 @@ impl ModelEmbed {
         Ok(embedding.clone())
     }
 }
+
+impl Embeddable for ModelEmbed {
+    fn to_embedding(&self, content: Vec<u8>) -> Vec<f32> {
+        let batch = vec![String::from_utf8(content).expect("Failed to convert content to string")];
+        let binding =  self.model.embed(batch, None).expect("Failed to get embedding");
+        let embedding =binding.first().expect("It can not calculate the embedding");
+        embedding.to_vec()
+    }
+}
+
 
 
 

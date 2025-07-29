@@ -6,22 +6,20 @@
 //! cargo run -p example-chat
 //! ```
 
-mod embedded;
 mod services;
 
 use axum::{extract::{
     ws::{Message, WebSocket, WebSocketUpgrade},
     State,
 }, response::{Html, IntoResponse}, routing::get, Form, Json, Router};
-use tower_http::{
-    services::{ServeDir, ServeFile},
-};
+use tower_http::services::{ServeDir, ServeFile};
 
-use futures_util::{stream::StreamExt};
+use futures_util::stream::StreamExt;
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
 };
+use arroy::distances::Euclidean;
 use tower_http::cors::CorsLayer;
 use tower_http::cors::Any;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -36,8 +34,8 @@ use axum::debug_handler;
 
 use fastembed::EmbeddingModel::ModernBertEmbedLarge;
 use serde::{Deserialize, Serialize};
-use crate::embedded::{DocumentEntry, ModelEmbed};
-
+use services::embed::{DocumentEntry, ModelEmbed};
+use crate::services::simple_db_nn::{DBConfig, SimpleDBNN};
 
 #[derive(Serialize)]
 struct EmbeddingResponse {
@@ -55,7 +53,8 @@ pub struct UploadFileForm {
 
 // Our shared state
 struct AppState {
-    ml_model: Mutex<ModelEmbed>
+    ml_model: Mutex<ModelEmbed>,
+    memory_db: Mutex<SimpleDBNN<ModelEmbed, Euclidean>>
     // Channel used to send messages to all connected clients.
    // tx: broadcast::Sender<String>,
 }
@@ -72,7 +71,8 @@ async fn main() {
 
     // Set up application state for use with with_state().
     let ml_model = Mutex::new(ModelEmbed::new());
-    let app_state = Arc::new(AppState { ml_model});
+    let memory_db = Mutex::new(SimpleDBNN::from_config(DBConfig::default()).unwrap());
+    let app_state = Arc::new(AppState { ml_model, memory_db});
 
     let serve_dir = ServeDir::new("web/verifier").not_found_service(ServeFile::new("web/verifier/index.html"));
     //let yew_serve_dir = ServeDir::new("web/yew").not_found_service(ServeFile::new("web/yew/index.html"));
@@ -130,11 +130,11 @@ async fn upload_file(
     let name = form.name.unwrap_or(String::new());
     let content = form.content.unwrap_or(String::new());
 
+
     if content.is_empty() {
         return Json(EmbeddingResponse{embedding: Vec::new()});
     }
-    let embedding = state.ml_model.lock().unwrap().calculate_one_embed(
-        DocumentEntry::new(name.as_str(), &content)).map_err(|e| Json(format!("{}", e))).unwrap();
+    let embedding = state.memory_db.lock().unwrap().put(content.as_str()).map_err(|e| Json(e)).unwrap();
     Json(EmbeddingResponse { embedding })
 }
 
