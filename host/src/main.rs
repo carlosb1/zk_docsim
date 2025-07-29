@@ -4,28 +4,11 @@ use std::fs;
 use methods::{
     GUEST_CODE_FOR_ZK_PROOF_ELF, GUEST_CODE_FOR_ZK_PROOF_ID
 };
-use risc0_zkvm::{default_prover, ExecutorEnv, Receipt};
+use risc0_zkvm::{ProveInfo, Receipt};
+use risc0_zkvm::{default_prover, ExecutorEnv};
 use sha2::{Digest, Sha256};
 use hex;
-
-fn execute_prover(input: u32 ) -> Receipt {
-    let env = ExecutorEnv::builder()
-        .write(&input)
-        .unwrap()
-        .build()
-        .unwrap();
-
-    // Obtain the default prover.
-    let prover = default_prover();
-
-    // Proof information by proving the specified ELF binary.
-    // This struct contains the receipt along with statistics about execution of the guest
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .unwrap();
-
-    prove_info.receipt
-}
+use host::execute_prove;
 
 fn main() {
     // Initialize tracing. In order to view logs, run `RUST_LOG=info cargo run`
@@ -47,16 +30,9 @@ fn main() {
 
     // For example:
     /* add input for circuit */
-    let input = ([0.1, 0.8, 0.3], [0.2, 0.9, 0.1]);
+    let input: (Vec<f32>, Vec<f32>) = (vec![0.1, 0.8, 0.3], vec![0.2, 0.9, 0.1]);
 
-    let env = ExecutorEnv::builder().write(&input).unwrap().build().unwrap();
-
-    // Obtain the default prover.
-    let prover = default_prover();
-
-    let prove_info = prover
-        .prove(env, GUEST_CODE_FOR_ZK_PROOF_ELF)
-        .unwrap();
+    let prove_info = execute_prove(input.0, input.1);
 
     // extract the receipt.
     let receipt = prove_info.receipt;
@@ -83,3 +59,5 @@ fn main() {
         .verify(GUEST_CODE_FOR_ZK_PROOF_ID)
         .unwrap();
 }
+
+

@@ -1,4 +1,4 @@
-use arroy::{Database as ArroyDatabase, Distance, Reader, Writer};
+use arroy::{Database as ArroyDatabase, Distance, ItemId, Reader, Writer};
 use heed::types::{Bytes, U32};
 
 use byteorder::BigEndian;
@@ -67,7 +67,11 @@ pub struct SimpleDBNN<T: Embeddable, D: Distance> {
     pub rng: StdRng,
 }
 
-
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct DBEntry {
+    pub content: String,
+    pub embedding: Vec<f32>,
+}
 
 
 #[derive(Debug, Clone)]
@@ -248,31 +252,42 @@ impl<T: Embeddable, D: Distance> SimpleDBNN<T, D> {
         Writer::<D>::new(self.nn_db, index, dimensions)
     }
 
-    fn put_db(&mut self, content: &str, id: u32) -> anyhow::Result<()> {
+
+
+    fn put_db(&mut self, content: &str, id: u32, embedding: Vec<f32> ) -> anyhow::Result<()> {
         let mut txn = self.env_db.write_txn()?;
-        self.heed_db.put(&mut txn, &id, content.as_bytes())?;
+        let entry = DBEntry {
+            content: String::from(content),
+            embedding};
+
+        let bytes = serde_json::to_vec(&entry)?;
+        self.heed_db.put(&mut txn, &id, &bytes)?;
         txn.commit()?;
         Ok(())
     }
 
-    fn put_batch_db(&mut self, batch: &Vec<(&str, u32)>) -> anyhow::Result<()> {
+    fn put_batch_db(&mut self, batch: &Vec<(&str, u32, Vec<f32>)>) -> anyhow::Result<()> {
         let mut txn = self.env_db.write_txn()?;
-        for (content, id) in batch {
-            self.heed_db.put(&mut txn, &id, content.as_bytes())?;
+        for (content, id, embedding) in batch {
+            let db_entry = DBEntry{content: content.to_string(), embedding: embedding.to_vec()};
+            self.heed_db.put(&mut txn, &id, serde_json::to_vec(&db_entry)?.as_ref())?;
         }
         txn.commit()?;
         Ok(())
     }
 
-    fn get_db(&mut self, id: u32) -> anyhow::Result<Option<Vec<u8>>> {
+    fn get_db(&mut self, id: u32) -> anyhow::Result<Option<DBEntry>> {
         let rotxn = self.env_db.read_txn()?;
         let Ok(elem) = self.heed_db.get(&rotxn, &id) else {
             return Ok(None);
         };
-        let Some(elem) = elem else {
+        let Some(bytes) = elem else {
             return Ok(None);
         };
-        Ok(Some(elem.to_vec()))
+
+        let s = String::from_utf8_lossy(bytes);
+        let entry: DBEntry = serde_json::from_slice(bytes)?;
+        Ok(Some(entry))
     }
 
     fn put_nn(&mut self, content: &str, id: u32, index: u16) -> anyhow::Result<Vec<f32>> {
@@ -280,24 +295,27 @@ impl<T: Embeddable, D: Distance> SimpleDBNN<T, D> {
         let env = self.env_embedded.clone();
         let mut wtxn = env.write_txn()?;
         let writer = self.nn_writer(index, self.dimensions);
-        writer.add_item(&mut wtxn, id, embedding.as_slice())?;
+        writer.add_item(&mut wtxn, id, embedding.clone().as_slice())?;
         writer.builder(&mut self.rng).build(&mut wtxn)?;
         wtxn.commit()?;
         Ok(embedding)
     }
 
-    fn put_batch_nn(&mut self, batch: &Vec<(&str, u32)>, index: u16) -> anyhow::Result<()> {
+    fn put_batch_nn(&mut self, batch: &Vec<(&str, u32)>, index: u16) -> anyhow::Result<Vec<Vec<f32>>> {
         let env = self.env_embedded.clone();
         let mut wtxn = env.write_txn()?;
         let writer = self.nn_writer(index, self.dimensions);
+        let mut embeds: Vec<Vec<f32>> = Vec::new();
         for (content, id) in batch {
             let embedding = self.embed_engine.to_embedding(content.as_bytes().to_vec());
             writer.add_item(&mut wtxn, *id, embedding.as_slice())?;
+            embeds.push(embedding);
         }
         writer.builder(&mut self.rng).build(&mut wtxn)?;
         wtxn.commit()?;
-        Ok(())
+        Ok(embeds)
     }
+
 
     fn get_nn(
         &mut self,
@@ -317,10 +335,11 @@ impl<T: Embeddable, D: Distance> SimpleDBNN<T, D> {
         Ok(ret_results)
     }
 
+
     pub fn put(&mut self, content: &str) -> anyhow::Result<Vec<f32>> {
         let current_id = self.next_id;
-        self.put_db(content, current_id)?;
         let embedding = self.put_nn(content, current_id, self.index)?;
+        self.put_db(content, current_id,  embedding.clone())?;
         self.next_id = self.next_id + 1;
         self.save_backup()?;
         Ok(embedding)
@@ -338,16 +357,16 @@ impl<T: Embeddable, D: Distance> SimpleDBNN<T, D> {
         Ok(())
     }
 
-    pub fn get(&mut self, content: &str, nn: usize) -> anyhow::Result<Vec<(u32, f32, String)>> {
+    pub fn get(&mut self, content: &str, nn: usize) -> anyhow::Result<Vec<(u32, f32, DBEntry)>> {
         let nears = self.get_nn(content, self.index, nn)?;
 
         let results = nears
             .iter()
             .map(|&(index, dist)| {
                 let val = self.get_db(index).unwrap().unwrap();
-                (index, dist, String::from_utf8(val).unwrap())
+                (index, dist, val)
             })
-            .collect::<Vec<(u32, f32, String)>>();
+            .collect::<Vec<(u32, f32, DBEntry)>>();
         Ok(results)
     }
 
@@ -361,8 +380,14 @@ impl<T: Embeddable, D: Distance> SimpleDBNN<T, D> {
                 result
             })
             .collect::<Vec<(&str, u32)>>();
-        self.put_batch_db(batch_with_indexes.as_ref())?;
-        self.put_batch_nn(batch_with_indexes.as_ref(), index)?;
+        let embeddings = self.put_batch_nn(batch_with_indexes.as_ref(), index)?;
+
+        let batch_with_all: Vec<(&str, u32, Vec<f32>)> = batch_with_indexes.iter()
+            .zip(embeddings.iter())
+            .map(|((a, b), c)| (*a, *b, c.clone()))
+            .collect();
+
+        self.put_batch_db(batch_with_all.as_ref())?;
         self.next_id = good_id_to_assign;
         self.save_backup()?;
         Ok(())
@@ -440,10 +465,10 @@ pub mod tests {
             .unwrap();
 
         let content = "Hello, world!";
-        dummy_db.put_db(content, 0).unwrap();
+        dummy_db.put_db(content, 0,  vec![0.0; 10]).unwrap();
 
         let elems = dummy_db.get_db(0).unwrap().unwrap();
-        let restored_content = String::from_utf8(elems.to_vec()).unwrap();
+        let restored_content = elems.content;
         println!("{:?}", restored_content);
         assert_eq!(content, restored_content);
         let _ = remove(&db_path, &embedded_path, &config_path);
@@ -466,7 +491,7 @@ pub mod tests {
         )
             .unwrap();
         let content = "Hello, world!";
-        dummy_db.put_db(content, 0).unwrap();
+        dummy_db.put_db(content, 0, vec![0.0; 10]).unwrap();
         let non_found = dummy_db.get_db(1).unwrap();
         assert!(non_found.is_none());
         let _ = remove(&db_path, &embedded_path, &config_path);
@@ -552,9 +577,9 @@ pub mod tests {
 
     #[test]
     pub fn real_batch_dummy_test() {
-        let db_path = PathBuf::from("test_db");
-        let embedded_path = PathBuf::from("test_embedded_db");
-        let config_path = PathBuf::from("config");
+        let db_path = PathBuf::from("test_dbb");
+        let embedded_path = PathBuf::from("test_embedded_dbb");
+        let config_path = PathBuf::from("configb");
         let _ = remove(&db_path, &embedded_path, &config_path);
 
         let mut dummy_db: SimpleDBNN<FastEmbeddingExample, Euclidean> = SimpleDBNN::new(
@@ -576,7 +601,7 @@ pub mod tests {
             .put_batch(vec![content1, content2, content3, content4], 0)
             .unwrap();
 
-        let results = dummy_db.get_nn("hello", 0, 4).unwrap();
+        let results = dummy_db.get("hello", 4).unwrap();
 
 
         println!("{:?}", results);

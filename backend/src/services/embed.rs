@@ -6,13 +6,12 @@ use crate::services::simple_db_nn::Embeddable;
 
 #[derive(Serialize, Deserialize)]
 pub struct DocumentEntry {
-    pub name: String,
     pub content: String,
 }
 
 impl DocumentEntry {
-    pub fn new(name: &str, content: &str) -> Self {
-        Self { name: name.to_string(), content: content.to_string() }
+    pub fn new(content: &str) -> Self {
+        Self { content: content.to_string() }
     }
 }
 
@@ -59,7 +58,7 @@ mod tests {
     #[test]
     fn check_calculate_embedding() {
         let model = ModelEmbed::new();
-        let results = model.calculate_one_embed(DocumentEntry::new("example", "encoding")).unwrap();
+        let results = model.calculate_one_embed(DocumentEntry::new( "encoding")).unwrap();
         println!("{:?}", results);
     }
  }

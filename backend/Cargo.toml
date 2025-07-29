@@ -20,3 +20,4 @@ heed = "0.22.0"
 byteorder = "1.5.0"
 rand = "0.8"
 rayon = "1.10.0"
+host = { path = "../host" }

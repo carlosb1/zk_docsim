@@ -6,6 +6,8 @@
 //! cargo run -p example-chat
 //! ```
 
+extern crate core;
+
 mod services;
 
 use axum::{extract::{
@@ -33,6 +35,7 @@ use axum::debug_handler;
 use axum::http::StatusCode;
 use fastembed::EmbeddingModel::ModernBertEmbedLarge;
 use serde::{Deserialize, Serialize};
+use tracing::log::error;
 use services::embed::{DocumentEntry, ModelEmbed};
 use crate::services::simple_db_nn::{DBConfig, SimpleDBNN};
 
@@ -161,11 +164,13 @@ struct SearchResult {
     id: u32,
     content: String,
     score: f32,
+    embedding: Vec<f32>,
+    receipt: Vec<u8>,
 }
 
 impl SearchResult {
-    pub fn new(id: u32, score: f32,  content: String) -> Self {
-        Self { id, content, score }
+    pub fn new(id: u32, score: f32,  content: String, embedding: Vec<f32>, receipt: Vec<u8>) -> Self {
+        Self { id, content, score, embedding, receipt }
     }
 }
 
@@ -174,15 +179,32 @@ async fn search(State(state): State<Arc<AppState>>, Json(req): Json<SearchReques
                                                                                        Json<Vec<SearchResult>>,
                                                                                        (StatusCode, Json<Vec<SearchResult>>)
                                                                                    > {
-    let results = state.memory_db.lock().unwrap().get(req.content.as_str(), req.top_k).map_err(|err| {
+
+    let original_embed =  ModelEmbed::new().calculate_one_embed(DocumentEntry{content: req.content.clone()})
+    .map_err(|err| {
+        error!("Err={:?}", err.to_string());
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(Vec::new()),
         )
     })?;
-    let search_results = results.iter().map(|(id, score,content )|
+        ;
+    let results = state.memory_db.lock().unwrap().get(req.content.as_str(), req.top_k).map_err(|err| {
+        error!("Err={:?}", err.to_string());
+        (
+
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(Vec::new()),
+        )
+    })?;
+    let search_results = results.iter().map(|(id, score,entry )|
         {
-            SearchResult::new(*id, *score, content.clone())
+
+            let cloned = (*entry).clone();
+            let content = cloned.content;
+            let embedding = cloned.embedding;
+            let receipt =  host::execute_and_serialize_receipt(original_embed.clone(), embedding.clone()).unwrap();
+            SearchResult::new(*id, *score, content, embedding,receipt)
         }
     ).collect::<Vec<SearchResult>>();
     Ok(Json(search_results))
