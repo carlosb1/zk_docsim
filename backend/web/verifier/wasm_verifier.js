@@ -27,22 +27,6 @@ function passArray8ToWasm0(arg, malloc) {
     return ptr;
 }
 
-let cachedUint32ArrayMemory0 = null;
-
-function getUint32ArrayMemory0() {
-    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
-        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
-    }
-    return cachedUint32ArrayMemory0;
-}
-
-function passArray32ToWasm0(arg, malloc) {
-    const ptr = malloc(arg.length * 4, 4) >>> 0;
-    getUint32ArrayMemory0().set(arg, ptr / 4);
-    WASM_VECTOR_LEN = arg.length;
-    return ptr;
-}
-
 function takeFromExternrefTable0(idx) {
     const value = wasm.__wbindgen_export_0.get(idx);
     wasm.__externref_table_dealloc(idx);
@@ -50,14 +34,11 @@ function takeFromExternrefTable0(idx) {
 }
 /**
  * @param {Uint8Array} receipt_bytes
- * @param {Uint32Array} image_id
  */
-export function verify_receipt(receipt_bytes, image_id) {
+export function verify_receipt(receipt_bytes) {
     const ptr0 = passArray8ToWasm0(receipt_bytes, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passArray32ToWasm0(image_id, wasm.__wbindgen_malloc);
-    const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.verify_receipt(ptr0, len0, ptr1, len1);
+    const ret = wasm.verify_receipt(ptr0, len0);
     if (ret[1]) {
         throw takeFromExternrefTable0(ret[0]);
     }
@@ -122,7 +103,6 @@ function __wbg_init_memory(imports, memory) {
 function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     __wbg_init.__wbindgen_wasm_module = module;
-    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
 
 

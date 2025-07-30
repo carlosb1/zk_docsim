@@ -1,12 +1,12 @@
 /* tslint:disable */
 /* eslint-disable */
-export function verify_receipt(receipt_bytes: Uint8Array, image_id: Uint32Array): void;
+export function verify_receipt(receipt_bytes: Uint8Array): void;
 
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly verify_receipt: (a: number, b: number, c: number, d: number) => [number, number];
+  readonly verify_receipt: (a: number, b: number) => [number, number];
   readonly sys_read: (a: number, b: number, c: number) => number;
   readonly sys_panic: (a: number, b: number) => void;
   readonly sys_verify_integrity: (a: number, b: number) => void;

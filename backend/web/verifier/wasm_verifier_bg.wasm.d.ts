@@ -1,7 +1,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const verify_receipt: (a: number, b: number, c: number, d: number) => [number, number];
+export const verify_receipt: (a: number, b: number) => [number, number];
 export const sys_read: (a: number, b: number, c: number) => number;
 export const sys_panic: (a: number, b: number) => void;
 export const sys_verify_integrity: (a: number, b: number) => void;

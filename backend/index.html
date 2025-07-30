@@ -2,30 +2,54 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Upload Document</title>
-
+    <title>Upload and Search</title>
+    <style>
+        table, th, td {
+            border: 1px solid #aaa;
+            border-collapse: collapse;
+            padding: 0.5em;
+        }
+        th {
+            background: #f0f0f0;
+        }
+    </style>
 </head>
 <body>
 <h1>Upload a Document</h1>
 
-<form action="http://127.0.0.1:3000/upload" method="post" enctype="multipart/form-data">
+<form id="uploadForm">
     <label for="fileInput">Choose a document to upload:</label>
     <input type="file" id="fileInput" name="file" required>
-    <br><br>
     <button type="submit">Upload</button>
-    <pre id="result"></pre>
 </form>
 
-<input type="text" id="query" placeholder="Escribe tu texto" />
-<button onclick="search()">Buscar</button>
-<pre id="results"></pre>
+<hr>
 
-<button onclick="run()">Verificar</button>
+<h2>Search</h2>
+<input type="text" id="query" placeholder="Escribe tu texto" size="80" />
+<button id="searchButton">Buscar</button>
+
+<table id="resultsTable">
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Score</th>
+        <th>Content</th>
+        <th>Embedding [0..5]</th>
+        <th>Receipt (bytes)</th>
+        <th>Verified</th>
+    </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
 <pre id="output"></pre>
-<script type="module" src="verifier/main.js"></script>
-<script>
-    const form = document.querySelector("form");
-    form.addEventListener("submit", async (event) => {
+
+<script type="module">
+    import { verify_receipt } from "/verifier/wasm_verifier.js";
+
+    // Form submission
+    document.getElementById("uploadForm").addEventListener("submit", async (event) => {
         event.preventDefault();
 
         const fileInput = document.getElementById("fileInput");
@@ -52,38 +76,57 @@
             });
 
             const json = await res.json();
-            document.getElementById("result").textContent = JSON.stringify(json, null, 2);
+            console.log("Upload response:", json);
         };
 
         reader.readAsText(file);
     });
 
-    /* search function */
-    async function search() {
-        const content = document.getElementById("query").value;
-        const resultsElement = document.getElementById("results");
+    // Search logic
+    document.getElementById("searchButton").addEventListener("click", async () => {
+        const query = document.getElementById("query").value;
+        const output = document.getElementById("output");
+        const tableBody = document.querySelector("#resultsTable tbody");
+        output.textContent = "";
+        tableBody.innerHTML = "";
 
-        const response = await fetch("/search", {
+        const res = await fetch("/search", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json"
             },
-            body: JSON.stringify({
-                content: content,
-                top_k: 5
-            })
+            body: JSON.stringify({ content: query, top_k: 5 })
         });
 
-        if (!response.ok) {
-            resultsElement.textContent = "❌ Error en la búsqueda";
+        if (!res.ok) {
+            output.textContent = "❌ Error en la búsqueda.";
             return;
         }
 
-        const results = await response.json();
+        const data = await res.json();
 
-        resultsElement.textContent = JSON.stringify(results, null, 2);
-    }
+        for (const result of data) {
+            let verifiedIcon = "❌";
+            try {
+                const receiptBytes = new Uint8Array(result.receipt);
+              //  verify_receipt(receiptBytes);
+                verifiedIcon = "✅";
+            } catch (e) {
+                console.warn(`❌ Verificación fallida para id=${result.id}`, e);
+            }
 
+            const row = document.createElement("tr");
+            row.innerHTML = `
+        <td>${result.id}</td>
+        <td>${result.score.toFixed(4)}</td>
+        <td><code>${result.content.slice(0, 100)}</code></td>
+        <td>${result.embedding.slice(0, 5).map(n => n.toFixed(3)).join(", ")}</td>
+        <td>${result.receipt.length}</td>
+        <td style="font-size: 1.5em;">${verifiedIcon}</td>
+      `;
+            tableBody.appendChild(row);
+        }
+    });
 </script>
 </body>
 </html>
