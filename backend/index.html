@@ -109,7 +109,7 @@
             let verifiedIcon = "❌";
             try {
                 const receiptBytes = new Uint8Array(result.receipt);
-              //  verify_receipt(receiptBytes);
+                verify_receipt(receiptBytes);
                 verifiedIcon = "✅";
             } catch (e) {
                 console.warn(`❌ Verificación fallida para id=${result.id}`, e);
